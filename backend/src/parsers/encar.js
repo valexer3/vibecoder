@@ -20,6 +20,18 @@ const BASE = 'https://api.encar.com/search/car/list/general';
 // Детальная карточка объявления - список отдаёт только 4 превью-фото в
 // SearchResults[].Photos, полная галерея (10-30+ фото) доступна только тут.
 const DETAIL_BASE = 'https://api.encar.com/v1/readside/vehicle';
+// Официальный отчёт техосмотра Encar (пробег по одометру, VIN-табличка,
+// выбросы, тюнинг, спецотметки, смена назначения, отзыв, конкретные
+// заменённые/повреждённые панели кузова). Это НЕ страховая история -
+// последняя в Корее ведётся отдельной организацией (카히스토리/보험개발원)
+// и не доступна через этот или любой другой публичный API Encar (проверено
+// отдельным аудитом - см. историю проекта).
+const INSPECTION_BASE = 'https://api.encar.com/v1/readside/inspection/vehicle';
+// Человекочитаемая версия того же отчёта - для кнопки "оригинал на Encar",
+// сама эта HTML-страница не парсится (она рендерит те же данные, что и
+// INSPECTION_BASE, только клиентским JS и в кодировке EUC-KR - проверено,
+// ничего эксклюзивного не даёт).
+const INSPECTION_PAGE_URL = (id) => `https://www.encar.com/md/sl/mdsl_regcar.do?method=inspectionViewNew&carid=${id}`;
 
 // С 2026-09-05 собираем только объявления, впервые опубликованные не раньше
 // этой даты (firstAdvertisedDateTime из detail-ответа - см. fetchEncarDetail).
@@ -116,7 +128,10 @@ export async function fetchEncarPage({ page = 0, limit = 20, brand } = {}) {
     if (firstAdvertisedAt && firstAdvertisedAt < FIRST_SEEN_CUTOFF) continue;
     allStale = false;
 
-    const item = normalizeEncarItem(raw, detail);
+    const inspection = await fetchEncarInspection(raw.Id);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const item = normalizeEncarItem(raw, detail, inspection);
     const fullPhotos = detail ? extractOrderedPhotos(detail) : null;
     if (fullPhotos && fullPhotos.length > 0) item.photos = fullPhotos;
     items.push(item);
@@ -145,6 +160,58 @@ async function fetchEncarDetail(id) {
     console.warn(`[encar] не удалось получить детальную карточку объявления ${id} после ${RETRY_DELAYS_MS.length + 1} попыток: ${e.message}`);
     return null;
   }
+}
+
+/**
+ * Официальный отчёт техосмотра Encar - см. INSPECTION_BASE выше. Как и
+ * fetchEncarDetail, при неудаче после retry возвращает null, а не роняет
+ * объявление/страницу - отчёт техосмотра есть не у каждого объявления
+ * (встречаются частные объявления без прохождения диагностики).
+ */
+async function fetchEncarInspection(id) {
+  try {
+    const { data } = await fetchWithRetry(() => client().get(`${INSPECTION_BASE}/${id}`), `отчёт техосмотра ${id}`);
+    return data ?? null;
+  } catch (e) {
+    console.warn(`[encar] не удалось получить отчёт техосмотра объявления ${id} после ${RETRY_DELAYS_MS.length + 1} попыток: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Компактная выжимка из сырого ответа inspection - берём только то, что
+ * относится к самой машине (пробег/VIN-табличка/выбросы/тюнинг/спецотметки/
+ * смена назначения/отзыв/факт ДТП и простого ремонта/конкретные повреждённые
+ * панели). Не берём inspectionSource/registrantId и прочие поля про то, кто
+ * и когда проводил осмотр - это уже про исполнителя, не про машину.
+ */
+function extractInspectionReport(inspection) {
+  if (!inspection?.master) return null;
+  const d = inspection.master.detail ?? {};
+  return {
+    accident: inspection.master.accdient ?? null,
+    simpleRepair: inspection.master.simpleRepair ?? null,
+    waterlog: d.waterlog ?? null,
+    tuning: d.tuning ?? null,
+    recall: d.recall ?? null,
+    mileage: d.mileage ?? null,
+    mileageStateType: d.mileageStateType?.title ?? null,
+    boardStateType: d.boardStateType?.title ?? null,
+    carStateType: d.carStateType?.title ?? null,
+    coout: d.coout ?? null,
+    hcout: d.hcout ?? null,
+    smout: d.smout ?? null,
+    seriousTypes: (d.seriousTypes ?? []).map((t) => t.title ?? t),
+    usageChangeTypes: (d.usageChangeTypes ?? []).map((t) => t.title ?? t),
+    recallFullFillTypes: (d.recallFullFillTypes ?? []).map((t) => t.title ?? t),
+    engineCheck: d.engineCheck ?? null,
+    trnsCheck: d.trnsCheck ?? null,
+    firstRegistrationDate: d.firstRegistrationDate ?? null,
+    damagedPanels: (inspection.outers ?? []).map((o) => ({
+      panel: o.type?.title ?? null,
+      status: o.statusTypes?.map((s) => s.title).join(', ') ?? null,
+    })),
+  };
 }
 
 /**
@@ -188,8 +255,11 @@ function extractOrderedPhotos(detail) {
  *   синхронизацию это не прерывает (та же логика, что уже была у фото).
  *   НЕ читаем отсюда detail.contact / detail.partnership.dealer и другие
  *   личные/контактные данные продавца или дилера - см. fetchEncarDetail.
+ * @param {object|null} inspection - ответ fetchEncarInspection того же
+ *   объявления - источник inspection_report. Может быть null (не у всех
+ *   объявлений есть отчёт техосмотра), тогда поле останется null.
  */
-export function normalizeEncarItem(item, detail = null) {
+export function normalizeEncarItem(item, detail = null, inspection = null) {
   // Превью из списка (до похода на детальную карточку в fetchEncarPage) -
   // используется как fallback, если детальный запрос не удастся.
   // ВАЖНО: у item.Photos[].type здесь просто числовой код фото (совпадает
@@ -249,6 +319,8 @@ export function normalizeEncarItem(item, detail = null) {
           preVerified: detail.advertisement.preVerified ?? null,
         }
       : null,
+    inspection_report: extractInspectionReport(inspection),
+    inspection_report_url: INSPECTION_PAGE_URL(item.Id),
   };
 }
 

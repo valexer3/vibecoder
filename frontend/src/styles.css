@@ -574,6 +574,7 @@ h1, h2, h3 {
 .details-trust-block p, .details-warranty-block p { margin: 0 0 4px; font-size: 14px; color: var(--steel); }
 .details-trust-block p.is-ok { color: #4fd166; }
 .details-trust-block p.is-warn { color: var(--red-bright); }
+.details-trust-block .details-source-link { display: inline-block; margin-top: 6px; }
 
 .details-price-block { margin-top: 14px; margin-bottom: 22px; }
 .details-price { font-family: var(--font-display); font-size: 30px; color: var(--red-bright); }

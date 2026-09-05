@@ -70,6 +70,9 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
 
   const optionsCount = car.options?.length ?? 0;
 
+  const report = car.inspection_report;
+  const damagedPanels = (report?.damagedPanels ?? []).filter((p) => p.panel);
+
   return (
     <div className="details-overlay" onClick={onClose}>
       <div className="details-modal" onClick={(e) => e.stopPropagation()}>
@@ -147,6 +150,40 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
                     ? '✓ Обременений и залогов нет'
                     : `⚠ Обременения: ${seizingCount}, залоги: ${pledgeCount}`}
                 </p>
+              )}
+            </div>
+          )}
+
+          {report && (
+            <div className="details-trust-block">
+              <h4>Официальный отчёт техосмотра</h4>
+              <p className={report.accident ? 'is-warn' : 'is-ok'}>
+                {report.accident ? '⚠ ДТП зафиксировано' : '✓ ДТП не зафиксировано'}
+              </p>
+              <p className={report.simpleRepair ? 'is-warn' : 'is-ok'}>
+                {report.simpleRepair ? '⚠ Простой ремонт был' : '✓ Простого ремонта не было'}
+              </p>
+              <p className={report.waterlog ? 'is-warn' : 'is-ok'}>
+                {report.waterlog ? '⚠ Признаки затопления' : '✓ Признаков затопления нет'}
+              </p>
+              {report.mileage != null && (
+                <p>Пробег по одометру: {report.mileage.toLocaleString('ru-RU')} км
+                  {report.mileageStateType ? ` (${report.mileageStateType})` : ''}
+                </p>
+              )}
+              {report.boardStateType && <p>Состояние VIN-таблички: {report.boardStateType}</p>}
+              {(report.coout || report.hcout) && (
+                <p>Выбросы: {report.coout ? `CO ${report.coout}%` : ''}{report.coout && report.hcout ? ', ' : ''}{report.hcout ? `HC ${report.hcout}ppm` : ''}</p>
+              )}
+              <p className={report.tuning ? 'is-warn' : 'is-ok'}>{report.tuning ? '⚠ Есть тюнинг' : '✓ Тюнинга нет'}</p>
+              <p className={report.recall ? 'is-warn' : 'is-ok'}>{report.recall ? '⚠ Есть открытый отзыв производителя' : '✓ Отзывов нет'}</p>
+              {damagedPanels.length > 0 && (
+                <p className="is-warn">⚠ Заменены/повреждены: {damagedPanels.map((p) => p.panel).join(', ')}</p>
+              )}
+              {car.inspection_report_url && (
+                <a className="details-source-link" href={car.inspection_report_url} target="_blank" rel="noreferrer">
+                  Посмотреть оригинал отчёта на Encar →
+                </a>
               )}
             </div>
           )}

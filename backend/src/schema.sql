@@ -40,6 +40,12 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS origin_price NUMERIC(12,2);
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS options JSONB DEFAULT '[]';
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS encar_verified JSONB;
+-- Официальный отчёт техосмотра Encar (/v1/readside/inspection/vehicle/{id}) -
+-- пробег по одометру, состояние VIN-таблички, выбросы, тюнинг, спецотметки,
+-- смена назначения, отзыв, конкретные заменённые/повреждённые панели кузова.
+-- НЕ страховая история (см. аудит) - это собственная диагностика Encar.
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS inspection_report JSONB;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS inspection_report_url TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_cars_brand_model ON cars (brand, model);
 CREATE INDEX IF NOT EXISTS idx_cars_year ON cars (year);

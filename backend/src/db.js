@@ -13,10 +13,11 @@ export async function upsertCar(car) {
       transmission, engine_volume, power_hp, color, price_origin, currency,
       price_rub, photos, url, raw, last_seen_at, is_active,
       vin, body_type, accident_info, seizing_info, warranty_info,
-      origin_price, options, registered_at, encar_verified
+      origin_price, options, registered_at, encar_verified,
+      inspection_report, inspection_report_url
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), true,
-      $19,$20,$21,$22,$23,$24,$25,$26,$27
+      $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29
     )
     ON CONFLICT (source, source_id) DO UPDATE SET
       brand = EXCLUDED.brand,
@@ -45,7 +46,9 @@ export async function upsertCar(car) {
       origin_price = EXCLUDED.origin_price,
       options = EXCLUDED.options,
       registered_at = EXCLUDED.registered_at,
-      encar_verified = EXCLUDED.encar_verified
+      encar_verified = EXCLUDED.encar_verified,
+      inspection_report = EXCLUDED.inspection_report,
+      inspection_report_url = EXCLUDED.inspection_report_url
     RETURNING id;
   `;
   const vals = [
@@ -62,6 +65,8 @@ export async function upsertCar(car) {
     JSON.stringify(car.options ?? []),
     car.registered_at ?? null,
     car.encar_verified ? JSON.stringify(car.encar_verified) : null,
+    car.inspection_report ? JSON.stringify(car.inspection_report) : null,
+    car.inspection_report_url ?? null,
   ];
   const { rows } = await pool.query(q, vals);
   return rows[0].id;
