@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { OPTION_MAP } from '../optionCodes.js';
 
 const COUNTRY_LABEL = { encar: 'Корея', che168: 'Китай' };
 const CURRENCY_LABEL = { KRW: '₩', CNY: '¥' };
@@ -68,7 +69,9 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
   const showOriginPrice = car.origin_price != null && car.price_origin != null
     && car.origin_price > car.price_origin * 1.15;
 
-  const optionsCount = car.options?.length ?? 0;
+  const optionCodes = car.options ?? [];
+  const knownOptions = optionCodes.map((code) => OPTION_MAP[code]).filter(Boolean);
+  const unknownOptionsCount = optionCodes.length - knownOptions.length;
 
   const report = car.inspection_report;
   const damagedPanels = (report?.damagedPanels ?? []).filter((p) => p.panel);
@@ -214,9 +217,17 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
             )}
           </div>
 
-          {optionsCount > 0 && (
+          {optionCodes.length > 0 && (
             <details className="details-options">
-              <summary>В комплектации: {optionsCount} опций</summary>
+              <summary>Комплектация ({optionCodes.length})</summary>
+              <ul className="details-options-list">
+                {knownOptions.map((opt) => (
+                  <li key={opt.name}><span aria-hidden="true">{opt.icon}</span> {opt.name}</li>
+                ))}
+                {unknownOptionsCount > 0 && (
+                  <li className="details-options-more">+{unknownOptionsCount} ещё</li>
+                )}
+              </ul>
             </details>
           )}
 

@@ -583,6 +583,12 @@ h1, h2, h3 {
 
 .details-options { margin-bottom: 16px; }
 .details-options summary { cursor: pointer; font-size: 13px; color: var(--steel); }
+.details-options-list {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+  margin: 10px 0 0; padding: 0; list-style: none;
+}
+.details-options-list li { font-size: 13px; color: var(--steel); display: flex; align-items: center; gap: 6px; }
+.details-options-list .details-options-more { color: var(--steel-dim); grid-column: 1 / -1; }
 
 .details-actions { display: flex; flex-direction: column; gap: 12px; margin-top: auto; }
 .details-cta {
