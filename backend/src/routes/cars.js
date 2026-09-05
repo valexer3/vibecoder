@@ -38,7 +38,7 @@ router.get('/', async (req, res, next) => {
       : sort === 'year_desc' ? 'year DESC'
       : 'last_seen_at DESC';
 
-    const lim = Math.min(Number(limit) || 24, 60);
+    const lim = Math.min(Math.max(Number(limit) || 24, 1), 60);
     const pageNum = Math.max(0, Math.trunc(Number(page)) || 0);
     const off = pageNum * lim;
 

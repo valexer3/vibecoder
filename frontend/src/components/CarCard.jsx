@@ -10,7 +10,7 @@ function formatPrice(rub) {
 function daysAgoLabel(registeredAt) {
   if (!registeredAt) return null;
   const days = Math.floor((Date.now() - new Date(registeredAt).getTime()) / 86400000);
-  if (days < 0) return null;
+  if (!Number.isFinite(days) || days < 0) return null;
   if (days === 0) return 'Сегодня';
   if (days === 1) return 'Вчера';
   return `${days} дн. назад`;

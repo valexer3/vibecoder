@@ -217,7 +217,7 @@ function extractInspectionReport(inspection) {
     firstRegistrationDate: d.firstRegistrationDate ?? null,
     damagedPanels: (inspection.outers ?? []).map((o) => ({
       panel: o.type?.title ?? null,
-      status: o.statusTypes?.map((s) => s.title).join(', ') ?? null,
+      status: (o.statusTypes ?? []).map((s) => s.title).join(', ') || null,
     })),
   };
 }
