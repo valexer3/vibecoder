@@ -1,0 +1,65 @@
+import pg from 'pg';
+import dotenv from 'dotenv';
+dotenv.config();
+
+export const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+export async function upsertCar(car) {
+  const q = `
+    INSERT INTO cars (
+      source, source_id, brand, model, trim, year, mileage_km, fuel_type,
+      transmission, engine_volume, power_hp, color, price_origin, currency,
+      price_rub, photos, url, raw, last_seen_at, is_active
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), true
+    )
+    ON CONFLICT (source, source_id) DO UPDATE SET
+      brand = EXCLUDED.brand,
+      model = EXCLUDED.model,
+      trim = EXCLUDED.trim,
+      year = EXCLUDED.year,
+      mileage_km = EXCLUDED.mileage_km,
+      fuel_type = EXCLUDED.fuel_type,
+      transmission = EXCLUDED.transmission,
+      engine_volume = EXCLUDED.engine_volume,
+      power_hp = EXCLUDED.power_hp,
+      color = EXCLUDED.color,
+      price_origin = EXCLUDED.price_origin,
+      currency = EXCLUDED.currency,
+      price_rub = EXCLUDED.price_rub,
+      photos = EXCLUDED.photos,
+      url = EXCLUDED.url,
+      raw = EXCLUDED.raw,
+      last_seen_at = now(),
+      is_active = true
+    RETURNING id;
+  `;
+  const vals = [
+    car.source, car.source_id, car.brand, car.model, car.trim ?? null,
+    car.year, car.mileage_km ?? null, car.fuel_type ?? null,
+    car.transmission ?? null, car.engine_volume ?? null, car.power_hp ?? null,
+    car.color ?? null, car.price_origin, car.currency, car.price_rub ?? null,
+    JSON.stringify(car.photos ?? []), car.url, JSON.stringify(car.raw ?? {}),
+  ];
+  const { rows } = await pool.query(q, vals);
+  return rows[0].id;
+}
+
+export async function getFxRate(currency) {
+  const { rows } = await pool.query(
+    'SELECT rub_rate FROM fx_rates WHERE currency = $1',
+    [currency]
+  );
+  return rows[0] ? Number(rows[0].rub_rate) : null;
+}
+
+export async function markStaleInactive(source, seenSourceIds) {
+  if (seenSourceIds.length === 0) return;
+  await pool.query(
+    `UPDATE cars SET is_active = false
+     WHERE source = $1 AND source_id <> ALL($2::text[])`,
+    [source, seenSourceIds]
+  );
+}
