@@ -21,8 +21,10 @@ async function syncEncar() {
   // Пишем в БД постранично (onPage), а не после накопления всего каталога -
   // при 200k+ объявлениях полный проход занимает часы, и без этого
   // last_seen_at/новые машины не появлялись бы в БД до самого конца цикла.
+  const maxItems = process.env.SYNC_MAX_ITEMS ? Number(process.env.SYNC_MAX_ITEMS) : undefined;
   await fetchAllEncar({
     limit: 20,
+    maxItems,
     onPage: async (items) => {
       for (const car of items) {
         car.price_rub = krwRate != null ? calculatePriceRub(car.price_origin, krwRate) : null;

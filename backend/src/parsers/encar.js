@@ -172,7 +172,7 @@ export function normalizeEncarItem(item) {
  * вызывающий код (см. syncEncar в sync.js) пишет их в БД немедленно, а не
  * ждёт полного накопления `all`.
  */
-export async function fetchAllEncar({ limit = 20, brand, onPage } = {}) {
+export async function fetchAllEncar({ limit = 20, brand, onPage, maxItems } = {}) {
   const all = [];
   let total = null;
   for (let page = 0; ; page++) {
@@ -184,6 +184,7 @@ export async function fetchAllEncar({ limit = 20, brand, onPage } = {}) {
     if (items.length === 0) break;
     if (onPage) await onPage(items);
     all.push(...items);
+    if (maxItems != null && all.length >= maxItems) break;
     if (total != null && all.length >= total) break;
     await new Promise((r) => setTimeout(r, 1200)); // не долбить API слишком часто
   }
