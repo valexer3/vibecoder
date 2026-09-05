@@ -27,6 +27,20 @@ CREATE TABLE IF NOT EXISTS cars (
   UNIQUE (source, source_id)
 );
 
+-- Расширенные поля из detail-ответа Encar (без контактов продавца/дилера -
+-- они намеренно не собираются, см. parsers/encar.js). ALTER TABLE ... ADD
+-- COLUMN IF NOT EXISTS - безопасно применять повторно, существующие строки
+-- получат NULL в новых колонках и не потеряются.
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS vin TEXT;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS body_type TEXT;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS accident_info JSONB;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS seizing_info JSONB;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS warranty_info JSONB;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS origin_price NUMERIC(12,2);
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS options JSONB DEFAULT '[]';
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS encar_verified JSONB;
+
 CREATE INDEX IF NOT EXISTS idx_cars_brand_model ON cars (brand, model);
 CREATE INDEX IF NOT EXISTS idx_cars_year ON cars (year);
 CREATE INDEX IF NOT EXISTS idx_cars_price ON cars (price_rub);

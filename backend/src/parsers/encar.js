@@ -13,7 +13,7 @@
  */
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { translateBrand, translateModel, translateWords, translateFuelType } from '../koreanDict.js';
+import { translateBrand, translateModel, translateWords, translateFuelType, translateBodyType, translateTransmission } from '../koreanDict.js';
 
 // general = полный каталог (частники + дилеры), premium = только дилеры-партнёры
 const BASE = 'https://api.encar.com/search/car/list/general';
@@ -94,8 +94,7 @@ export async function fetchEncarPage({ page = 0, limit = 20, brand } = {}) {
     if (firstAdvertisedAt && firstAdvertisedAt < FIRST_SEEN_CUTOFF) continue;
     allStale = false;
 
-    const item = normalizeEncarItem(raw);
-    item.first_advertised_at = firstAdvertisedAt;
+    const item = normalizeEncarItem(raw, detail);
     const fullPhotos = detail ? extractOrderedPhotos(detail) : null;
     if (fullPhotos && fullPhotos.length > 0) item.photos = fullPhotos;
     items.push(item);
@@ -158,7 +157,17 @@ function extractOrderedPhotos(detail) {
   return ordered.map((p) => `https://ci.encar.com/carpicture${p.path}`);
 }
 
-export function normalizeEncarItem(item) {
+/**
+ * @param {object} item - карточка из списка (SearchResults[])
+ * @param {object|null} detail - detail-ответ того же объявления (см.
+ *   fetchEncarDetail) - источник vin/body_type/accident/seizing/warranty/
+ *   origin_price/options/registered_at/encar_verified. Может быть null,
+ *   если detail-запрос не удался - тогда эти поля останутся null/пустыми,
+ *   синхронизацию это не прерывает (та же логика, что уже была у фото).
+ *   НЕ читаем отсюда detail.contact / detail.partnership.dealer и другие
+ *   личные/контактные данные продавца или дилера - см. fetchEncarDetail.
+ */
+export function normalizeEncarItem(item, detail = null) {
   // Превью из списка (до похода на детальную карточку в fetchEncarPage) -
   // используется как fallback, если детальный запрос не удастся.
   // ВАЖНО: у item.Photos[].type здесь просто числовой код фото (совпадает
@@ -171,6 +180,15 @@ export function normalizeEncarItem(item) {
     ? [...item.Photos].sort((a, b) => a.ordering - b.ordering).map((p) => `https://ci.encar.com/carpicture${p.location}`)
     : item.Photo ? [`https://ci.encar.com/carpicture${item.Photo}001.jpg`] : [];
 
+  const options = detail?.options
+    ? [
+        ...(detail.options.standard ?? []),
+        ...(detail.options.etc ?? []),
+        ...(detail.options.choice ?? []),
+        ...(detail.options.tuning ?? []),
+      ]
+    : [];
+
   return {
     source: 'encar',
     source_id: String(item.Id),
@@ -182,7 +200,9 @@ export function normalizeEncarItem(item) {
     year: parseInt(String(item.FormYear ?? item.Year).slice(0, 4), 10),
     mileage_km: item.Mileage ?? null,
     fuel_type: translateFuelType(item.FuelType ?? null),
-    transmission: item.Transmission ?? null,
+    // spec.transmissionName из detail надёжнее item.Transmission из списка
+    // (там часто пусто) - используем список только как fallback.
+    transmission: translateTransmission(detail?.spec?.transmissionName ?? item.Transmission ?? null),
     engine_volume: item.Displacement ? Number(item.Displacement) / 1000 : null,
     power_hp: null, // Encar не всегда отдаёт л.с. в списке - подтягивается со страницы объявления при необходимости
     color: item.Color ?? null,
@@ -191,6 +211,22 @@ export function normalizeEncarItem(item) {
     photos,
     url: `https://www.encar.com/dc/dc_cardetailview.do?carid=${item.Id}`,
     raw: item,
+    vin: detail?.vin ?? null,
+    body_type: translateBodyType(detail?.spec?.bodyName ?? null),
+    accident_info: detail?.condition?.accident ?? null,
+    seizing_info: detail?.condition?.seizing ?? null,
+    warranty_info: detail?.category?.warranty ?? null,
+    origin_price: detail?.category?.originPrice != null ? Number(detail.category.originPrice) * 10000 : null,
+    options,
+    registered_at: detail?.manage?.firstAdvertisedDateTime ?? null,
+    encar_verified: detail?.advertisement
+      ? {
+          encarCheck: detail.advertisement.encarCheck ?? null,
+          diagnosisCar: detail.advertisement.diagnosisCar ?? null,
+          directInspected: detail.advertisement.directInspected ?? null,
+          preVerified: detail.advertisement.preVerified ?? null,
+        }
+      : null,
   };
 }
 

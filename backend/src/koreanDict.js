@@ -267,6 +267,41 @@ export function translateFuelType(koreanFuel) {
   return FUEL_MAP[koreanFuel] ?? translateWords(koreanFuel);
 }
 
+// Категории кузова Encar (spec.bodyName в detail-ответе) - полный список
+// стандартных категорий классификации Encar, не только те, что встретились
+// в тестовой выборке (경차/소형차/준중형차/중형차/대형차 - линейка легковых
+// по классу размера, а не по форме кузова, как принято на корейском рынке).
+const BODY_TYPE_MAP = {
+  '경차': 'Малолитражный автомобиль',
+  '소형차': 'Малый класс',
+  '준중형차': 'Компактный класс',
+  '중형차': 'Средний класс',
+  '대형차': 'Представительский класс',
+  'SUV': 'SUV',
+  '스포츠카': 'Спорткар',
+  '승합차': 'Микроавтобус',
+  '화물차': 'Грузовой автомобиль',
+  'RV': 'Минивэн',
+};
+
+export function translateBodyType(koreanBodyType) {
+  if (!koreanBodyType) return koreanBodyType;
+  return BODY_TYPE_MAP[koreanBodyType] ?? translateWords(koreanBodyType);
+}
+
+// Тип коробки передач (spec.transmissionName в detail-ответе).
+const TRANSMISSION_MAP = {
+  '오토': 'Автомат',
+  '수동': 'Механика',
+  '세미오토': 'Робот',
+  'CVT': 'Вариатор',
+};
+
+export function translateTransmission(koreanTransmission) {
+  if (!koreanTransmission) return koreanTransmission;
+  return TRANSMISSION_MAP[koreanTransmission] ?? translateWords(koreanTransmission);
+}
+
 export function translateBrand(koreanBrand) {
   if (!koreanBrand) return koreanBrand;
   return BRAND_MAP[koreanBrand] ?? translateWords(koreanBrand);

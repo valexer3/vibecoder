@@ -11,9 +11,12 @@ export async function upsertCar(car) {
     INSERT INTO cars (
       source, source_id, brand, model, trim, year, mileage_km, fuel_type,
       transmission, engine_volume, power_hp, color, price_origin, currency,
-      price_rub, photos, url, raw, last_seen_at, is_active
+      price_rub, photos, url, raw, last_seen_at, is_active,
+      vin, body_type, accident_info, seizing_info, warranty_info,
+      origin_price, options, registered_at, encar_verified
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), true
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now(), true,
+      $19,$20,$21,$22,$23,$24,$25,$26,$27
     )
     ON CONFLICT (source, source_id) DO UPDATE SET
       brand = EXCLUDED.brand,
@@ -33,7 +36,16 @@ export async function upsertCar(car) {
       url = EXCLUDED.url,
       raw = EXCLUDED.raw,
       last_seen_at = now(),
-      is_active = true
+      is_active = true,
+      vin = EXCLUDED.vin,
+      body_type = EXCLUDED.body_type,
+      accident_info = EXCLUDED.accident_info,
+      seizing_info = EXCLUDED.seizing_info,
+      warranty_info = EXCLUDED.warranty_info,
+      origin_price = EXCLUDED.origin_price,
+      options = EXCLUDED.options,
+      registered_at = EXCLUDED.registered_at,
+      encar_verified = EXCLUDED.encar_verified
     RETURNING id;
   `;
   const vals = [
@@ -42,6 +54,14 @@ export async function upsertCar(car) {
     car.transmission ?? null, car.engine_volume ?? null, car.power_hp ?? null,
     car.color ?? null, car.price_origin, car.currency, car.price_rub ?? null,
     JSON.stringify(car.photos ?? []), car.url, JSON.stringify(car.raw ?? {}),
+    car.vin ?? null, car.body_type ?? null,
+    car.accident_info ? JSON.stringify(car.accident_info) : null,
+    car.seizing_info ? JSON.stringify(car.seizing_info) : null,
+    car.warranty_info ? JSON.stringify(car.warranty_info) : null,
+    car.origin_price ?? null,
+    JSON.stringify(car.options ?? []),
+    car.registered_at ?? null,
+    car.encar_verified ? JSON.stringify(car.encar_verified) : null,
   ];
   const { rows } = await pool.query(q, vals);
   return rows[0].id;
