@@ -128,10 +128,18 @@ export async function fetchEncarPage({ page = 0, limit = 20, brand } = {}) {
     if (firstAdvertisedAt && firstAdvertisedAt < FIRST_SEEN_CUTOFF) continue;
     allStale = false;
 
-    const inspection = await fetchEncarInspection(raw.Id);
+    // Инспекционный эндпоинт (в отличие от DETAIL_BASE) требует настоящий
+    // vehicleId, а не dummyVehicleId/Id из списка - у переразмещённых или
+    // дублированных объявлений (manage.reRegistered/dummyVehicleId) они не
+    // совпадают, и запрос по Id из списка даёт 404 (проверено на реальных
+    // объявлениях с прода). detail.vehicleId есть всегда, когда сам detail
+    // получен успешно; если detail не удался - используем Id как fallback,
+    // хотя для таких дублированных объявлений это может снова дать 404.
+    const inspectionId = detail?.vehicleId ?? raw.Id;
+    const inspection = await fetchEncarInspection(inspectionId);
     await new Promise((r) => setTimeout(r, 300));
 
-    const item = normalizeEncarItem(raw, detail, inspection);
+    const item = normalizeEncarItem(raw, detail, inspection, inspectionId);
     const fullPhotos = detail ? extractOrderedPhotos(detail) : null;
     if (fullPhotos && fullPhotos.length > 0) item.photos = fullPhotos;
     items.push(item);
@@ -258,8 +266,12 @@ function extractOrderedPhotos(detail) {
  * @param {object|null} inspection - ответ fetchEncarInspection того же
  *   объявления - источник inspection_report. Может быть null (не у всех
  *   объявлений есть отчёт техосмотра), тогда поле останется null.
+ * @param {string|number} [inspectionId] - реальный vehicleId, использованный
+ *   для запроса inspection (см. fetchEncarPage) - HTML-страница отчёта тоже
+ *   требует именно его, а не item.Id (dummyVehicleId у переразмещённых
+ *   объявлений). По умолчанию item.Id, если явно не передан.
  */
-export function normalizeEncarItem(item, detail = null, inspection = null) {
+export function normalizeEncarItem(item, detail = null, inspection = null, inspectionId = item.Id) {
   // Превью из списка (до похода на детальную карточку в fetchEncarPage) -
   // используется как fallback, если детальный запрос не удастся.
   // ВАЖНО: у item.Photos[].type здесь просто числовой код фото (совпадает
@@ -320,7 +332,7 @@ export function normalizeEncarItem(item, detail = null, inspection = null) {
         }
       : null,
     inspection_report: extractInspectionReport(inspection),
-    inspection_report_url: INSPECTION_PAGE_URL(item.Id),
+    inspection_report_url: INSPECTION_PAGE_URL(inspectionId),
   };
 }
 
