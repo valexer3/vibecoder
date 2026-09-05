@@ -2,7 +2,7 @@ import 'dotenv/config';
 import cron from 'node-cron';
 import { fetchAllEncar } from './parsers/encar.js';
 import { fetchAllChe168 } from './parsers/che168.js';
-import { upsertCar, markStaleInactive, getFxRate, pool } from './db.js';
+import { upsertCar, markStaleInactive, getFxRate, pool, getSyncProgress, setSyncProgress, clearSyncProgress } from './db.js';
 import { calculatePriceRub } from './pricing.js';
 
 const CHE168_LIST_URLS = [
@@ -18,24 +18,57 @@ async function syncEncar() {
   }
   const ids = [];
   let total = 0;
+  const startPage = await getSyncProgress('encar');
+  if (startPage > 0) {
+    console.log(`[sync] Encar: продолжаю с сохранённого прогресса - страница ${startPage} (предыдущий проход прервался из-за сбоя)`);
+  }
   // Пишем в БД постранично (onPage), а не после накопления всего каталога -
   // при 200k+ объявлениях полный проход занимает часы, и без этого
   // last_seen_at/новые машины не появлялись бы в БД до самого конца цикла.
   const maxItems = process.env.SYNC_MAX_ITEMS ? Number(process.env.SYNC_MAX_ITEMS) : undefined;
-  await fetchAllEncar({
-    limit: 20,
-    maxItems,
-    onPage: async (items) => {
-      for (const car of items) {
-        car.price_rub = krwRate != null ? calculatePriceRub(car.price_origin, krwRate) : null;
-        await upsertCar(car);
-        ids.push(car.source_id);
-      }
-      total += items.length;
-      console.log(`[sync] Encar: обработано ${total} объявлений...`);
-    },
-  });
-  await markStaleInactive('encar', ids);
+  let completedFully = false;
+  try {
+    await fetchAllEncar({
+      limit: 20,
+      maxItems,
+      startPage,
+      onPage: async (items, page) => {
+        for (const car of items) {
+          try {
+            car.price_rub = krwRate != null ? calculatePriceRub(car.price_origin, krwRate) : null;
+            await upsertCar(car);
+            ids.push(car.source_id);
+          } catch (e) {
+            // Одно кривое объявление не должно убивать всю страницу/проход -
+            // логируем и переходим к следующему.
+            console.error(`[sync] Encar: не удалось сохранить объявление ${car.source_id}: ${e.message}`);
+          }
+        }
+        total += items.length;
+        console.log(`[sync] Encar: обработано ${total} объявлений...`);
+        await setSyncProgress('encar', page + 1);
+      },
+    });
+    // Проход завершился штатно (конец каталога либо ранний выход по дате) -
+    // сбрасываем прогресс, следующий цикл снова начнёт со страницы 0.
+    await clearSyncProgress('encar');
+    completedFully = true;
+  } catch (e) {
+    // Сюда попадаем только при HARD_FAILURE_PAGES_THRESHOLD подряд неудачных
+    // страниц (см. parsers/encar.js) - прогресс уже сохранён на последней
+    // успешной странице, следующий запуск продолжит с неё.
+    console.error(`[sync] Encar: проход прерван - ${e.message}`);
+  }
+  // markStaleInactive гасит is_active у ВСЕГО, чего нет в ids - корректно
+  // только когда проход реально прошёл весь актуальный каталог (или дошёл
+  // до раннего выхода по дате). При тестовом SYNC_MAX_ITEMS или при обрыве
+  // из-за сбоя API ids - лишь маленький кусок каталога, и вызов здесь
+  // ошибочно погасил бы почти все остальные машины (это уже случалось).
+  if (completedFully && maxItems == null) {
+    await markStaleInactive('encar', ids);
+  } else {
+    console.log('[sync] Encar: markStaleInactive пропущен (неполный/тестовый проход)');
+  }
   console.log(`[sync] Encar: готово, объявлений: ${total}`);
 }
 
@@ -95,8 +128,16 @@ async function syncFx() {
 
 async function runAll() {
   await syncFx();
-  await syncEncar();
-  await syncChe168();
+  try {
+    await syncEncar();
+  } catch (e) {
+    console.error('[sync] Encar: непредвиденная ошибка верхнего уровня -', e.message);
+  }
+  try {
+    await syncChe168();
+  } catch (e) {
+    console.error('[sync] Che168: непредвиденная ошибка верхнего уровня -', e.message);
+  }
 }
 
 if (process.argv.includes('--once')) {

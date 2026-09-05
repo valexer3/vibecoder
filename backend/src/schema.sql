@@ -61,3 +61,13 @@ CREATE TABLE IF NOT EXISTS fx_rates (
   rub_rate NUMERIC(10,4) NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Курсор пагинации sync.js: с какой страницы продолжать при следующем
+-- запуске, если предыдущий проход прервался из-за серии сбоев API (см.
+-- parsers/encar.js). При штатном завершении прохода строка удаляется -
+-- следующий цикл снова начинает со страницы 0 (свежие объявления).
+CREATE TABLE IF NOT EXISTS sync_progress (
+  source TEXT PRIMARY KEY,
+  next_page INT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

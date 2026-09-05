@@ -31,6 +31,28 @@ const DETAIL_BASE = 'https://api.encar.com/v1/readside/vehicle';
 // он влияет только на то, что забирается заново при следующих запусках sync.
 const FIRST_SEEN_CUTOFF = '2026-09-01T00:00:00';
 
+// Задержки между повторными попытками при сетевой ошибке/403/таймауте/
+// невалидном JSON - и на список, и на детальную карточку (обе идут через
+// один и тот же нестабильный API Encar).
+const RETRY_DELAYS_MS = [2000, 5000, 10000];
+
+async function fetchWithRetry(fn, label) {
+  let lastError;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      if (attempt < RETRY_DELAYS_MS.length) {
+        const delay = RETRY_DELAYS_MS[attempt];
+        console.warn(`[encar] ${label}: попытка ${attempt + 1} не удалась (${e.message}), повтор через ${delay}мс`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
 function client() {
   const agent = process.env.PROXY_URL_KR
     ? new HttpsProxyAgent(process.env.PROXY_URL_KR)
@@ -75,7 +97,7 @@ export async function fetchEncarPage({ page = 0, limit = 20, brand } = {}) {
     sr: `|ModifiedDate|${page * limit}|${limit}`,
   };
 
-  const { data } = await client().get(BASE, { params });
+  const { data } = await fetchWithRetry(() => client().get(BASE, { params }), `страница ${page}`);
   // data.SearchResults: массив карточек, data.Count: общее число объявлений по фильтру
   const rawItems = data?.SearchResults ?? [];
 
@@ -117,10 +139,10 @@ export async function fetchEncarPage({ page = 0, limit = 20, brand } = {}) {
  */
 async function fetchEncarDetail(id) {
   try {
-    const { data } = await client().get(`${DETAIL_BASE}/${id}`);
+    const { data } = await fetchWithRetry(() => client().get(`${DETAIL_BASE}/${id}`), `детальная карточка ${id}`);
     return data ?? null;
   } catch (e) {
-    console.warn(`[encar] не удалось получить детальную карточку объявления ${id}: ${e.message}`);
+    console.warn(`[encar] не удалось получить детальную карточку объявления ${id} после ${RETRY_DELAYS_MS.length + 1} попыток: ${e.message}`);
     return null;
   }
 }
@@ -243,7 +265,15 @@ export function normalizeEncarItem(item, detail = null) {
  * вызывающий код (см. syncEncar в sync.js) пишет их в БД немедленно, а не
  * ждёт полного накопления `all`.
  */
-export async function fetchAllEncar({ limit = 20, brand, onPage, maxItems } = {}) {
+// Если подряд столько страниц дают ошибку (не "старые по дате", а реальный
+// сбой запроса после исчерпания retry) - скорее всего сайт лёг или забанил
+// IP, а не разовая помеха. Продолжать долбить его тысячи раз бессмысленно -
+// останавливаем проход, оставляя сохранённый прогресс (см. sync.js) для
+// продолжения со следующего запуска, вместо того чтобы либо застрять
+// намертво, либо уронить весь процесс необработанным исключением.
+const HARD_FAILURE_PAGES_THRESHOLD = 5;
+
+export async function fetchAllEncar({ limit = 20, brand, onPage, maxItems, startPage = 0 } = {}) {
   const all = [];
   let total = null;
   // Список отсортирован по ModifiedDate, но НЕ строго монотонно: дилерские
@@ -258,13 +288,30 @@ export async function fetchAllEncar({ limit = 20, brand, onPage, maxItems } = {}
   // "поднятий" старых объявлений подряд закопает свежие глубже одной страницы.
   const STALE_PAGES_THRESHOLD = 4;
   let consecutiveStalePages = 0;
-  for (let page = 0; ; page++) {
-    const { items, total: pageTotal, allStale } = await fetchEncarPage({ page, limit, brand });
-    if (page === 0) {
+  let consecutiveHardFailures = 0;
+  for (let page = startPage; ; page++) {
+    let pageResult;
+    try {
+      pageResult = await fetchEncarPage({ page, limit, brand });
+    } catch (e) {
+      // fetchEncarPage сама уже сделала 3 попытки со backoff (fetchWithRetry) -
+      // сюда попадаем, только когда все они исчерпаны.
+      console.error(`[encar] страница ${page}: не удалось получить после ${RETRY_DELAYS_MS.length + 1} попыток - ${e.message}`);
+      consecutiveHardFailures++;
+      if (consecutiveHardFailures >= HARD_FAILURE_PAGES_THRESHOLD) {
+        console.error(`[encar] ${HARD_FAILURE_PAGES_THRESHOLD} страниц подряд не отдались - похоже на бан/недоступность API, останавливаю проход досрочно (прогресс сохранён на странице ${page})`);
+        throw Object.assign(new Error(`Encar: ${HARD_FAILURE_PAGES_THRESHOLD} страниц подряд не удались, остановлено на странице ${page}`), { failedAtPage: page });
+      }
+      continue; // пропускаем страницу, пробуем следующую
+    }
+    consecutiveHardFailures = 0;
+
+    const { items, total: pageTotal, allStale } = pageResult;
+    if (page === startPage) {
       total = pageTotal;
       console.log(`[encar] всего объявлений по фильтру: ${total ?? 'неизвестно (нет Count в ответе)'}`);
     }
-    if (onPage && items.length > 0) await onPage(items);
+    if (onPage && items.length > 0) await onPage(items, page);
     all.push(...items);
 
     consecutiveStalePages = allStale ? consecutiveStalePages + 1 : 0;

@@ -83,3 +83,23 @@ export async function markStaleInactive(source, seenSourceIds) {
     [source, seenSourceIds]
   );
 }
+
+export async function getSyncProgress(source) {
+  const { rows } = await pool.query(
+    'SELECT next_page FROM sync_progress WHERE source = $1',
+    [source]
+  );
+  return rows[0] ? rows[0].next_page : 0;
+}
+
+export async function setSyncProgress(source, nextPage) {
+  await pool.query(
+    `INSERT INTO sync_progress (source, next_page, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (source) DO UPDATE SET next_page = $2, updated_at = now()`,
+    [source, nextPage]
+  );
+}
+
+export async function clearSyncProgress(source) {
+  await pool.query('DELETE FROM sync_progress WHERE source = $1', [source]);
+}
