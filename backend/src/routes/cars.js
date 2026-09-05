@@ -47,7 +47,8 @@ router.get('/', async (req, res, next) => {
              transmission, engine_volume, price_origin, currency, price_rub,
              photos, url,
              vin, body_type, accident_info, seizing_info, warranty_info,
-             origin_price, options, registered_at, encar_verified
+             origin_price, options, registered_at, encar_verified,
+             inspection_report, inspection_report_url
       FROM cars
       WHERE ${where.join(' AND ')}
       ORDER BY ${orderBy}
