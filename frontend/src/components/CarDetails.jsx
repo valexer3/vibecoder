@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { OPTION_MAP } from '../optionCodes.js';
+import { OPTION_MAP, OPTION_GROUPS } from '../optionCodes.js';
 
 const COUNTRY_LABEL = { encar: 'Корея', che168: 'Китай' };
 const CURRENCY_LABEL = { KRW: '₩', CNY: '¥' };
@@ -72,6 +72,9 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
   const optionCodes = car.options ?? [];
   const knownOptions = optionCodes.map((code) => OPTION_MAP[code]).filter(Boolean);
   const unknownOptionsCount = optionCodes.length - knownOptions.length;
+  const optionsByGroup = Object.keys(OPTION_GROUPS)
+    .map((group) => ({ group, label: OPTION_GROUPS[group], items: knownOptions.filter((o) => o.group === group) }))
+    .filter((g) => g.items.length > 0);
 
   const report = car.inspection_report;
   const damagedPanels = (report?.damagedPanels ?? []).filter((p) => p.panel);
@@ -220,14 +223,19 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
           {optionCodes.length > 0 && (
             <details className="details-options">
               <summary>Комплектация ({optionCodes.length})</summary>
-              <ul className="details-options-list">
-                {knownOptions.map((opt) => (
-                  <li key={opt.name}><span aria-hidden="true">{opt.icon}</span> {opt.name}</li>
-                ))}
-                {unknownOptionsCount > 0 && (
-                  <li className="details-options-more">+{unknownOptionsCount} ещё</li>
-                )}
-              </ul>
+              {optionsByGroup.map(({ group, label, items }) => (
+                <div key={group} className="details-options-group">
+                  <h5>{label}</h5>
+                  <ul className="details-options-list">
+                    {items.map((opt) => (
+                      <li key={opt.name}><span aria-hidden="true">{opt.icon}</span> {opt.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {unknownOptionsCount > 0 && (
+                <p className="details-options-more">+{unknownOptionsCount} ещё</p>
+              )}
             </details>
           )}
 

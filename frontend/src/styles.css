@@ -583,12 +583,17 @@ h1, h2, h3 {
 
 .details-options { margin-bottom: 16px; }
 .details-options summary { cursor: pointer; font-size: 13px; color: var(--steel); }
+.details-options-group { margin-top: 14px; }
+.details-options-group h5 {
+  font-size: 11px; color: var(--steel-dim); text-transform: uppercase; letter-spacing: 0.04em;
+  margin: 0 0 6px;
+}
 .details-options-list {
   display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
-  margin: 10px 0 0; padding: 0; list-style: none;
+  margin: 0; padding: 0; list-style: none;
 }
 .details-options-list li { font-size: 13px; color: var(--steel); display: flex; align-items: center; gap: 6px; }
-.details-options-list .details-options-more { color: var(--steel-dim); grid-column: 1 / -1; }
+.details-options-more { color: var(--steel-dim); font-size: 13px; margin: 10px 0 0; }
 
 .details-actions { display: flex; flex-direction: column; gap: 12px; margin-top: auto; }
 .details-cta {
