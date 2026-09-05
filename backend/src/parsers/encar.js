@@ -21,6 +21,16 @@ const BASE = 'https://api.encar.com/search/car/list/general';
 // SearchResults[].Photos, полная галерея (10-30+ фото) доступна только тут.
 const DETAIL_BASE = 'https://api.encar.com/v1/readside/vehicle';
 
+// С 2026-09-05 собираем только объявления, впервые опубликованные не раньше
+// этой даты (firstAdvertisedDateTime из detail-ответа - см. fetchEncarDetail).
+// registDateTime для фильтра не годится: у переразмещённых/дублированных
+// объявлений (ServiceCopyCar=DUPLICATION, reRegistered=true) он указывает на
+// первичную регистрацию карточки в системе Encar, а не на момент, когда
+// объявление реально стало публично видимым - firstAdvertisedDateTime точнее.
+// Уже загруженные тестовые записи (до этой даты) этот фильтр не трогает -
+// он влияет только на то, что забирается заново при следующих запусках sync.
+const FIRST_SEEN_CUTOFF = '2026-09-01T00:00:00';
+
 function client() {
   const agent = process.env.PROXY_URL_KR
     ? new HttpsProxyAgent(process.env.PROXY_URL_KR)
@@ -67,26 +77,57 @@ export async function fetchEncarPage({ page = 0, limit = 20, brand } = {}) {
 
   const { data } = await client().get(BASE, { params });
   // data.SearchResults: массив карточек, data.Count: общее число объявлений по фильтру
-  const items = (data?.SearchResults ?? []).map(normalizeEncarItem);
+  const rawItems = data?.SearchResults ?? [];
 
-  // Список отдаёт только 4 превью-фото на объявление - догружаем полную
-  // галерею с детальной карточки каждого объявления (без ограничения по
-  // числу фото). Если детальный запрос не удался - остаются превью-фото
-  // из списка как fallback, синхронизацию это не прерывает.
-  for (const item of items) {
-    const fullPhotos = await fetchEncarPhotos(item.source_id);
-    if (fullPhotos && fullPhotos.length > 0) item.photos = fullPhotos;
+  // Список отдаёт только 4 превью-фото и не отдаёт firstAdvertisedDateTime -
+  // за обоими идём на детальную карточку одним запросом на объявление (не
+  // двумя), и по дате из него же сразу решаем, оставлять объявление или нет.
+  // Объявления старше FIRST_SEEN_CUTOFF отбрасываем ДО normalizeEncarItem -
+  // они не попадают ни в БД, ни в лишние сетевые запросы за фото.
+  const items = [];
+  let allStale = rawItems.length > 0;
+  for (const raw of rawItems) {
+    const detail = await fetchEncarDetail(raw.Id);
     await new Promise((r) => setTimeout(r, 300));
+
+    const firstAdvertisedAt = detail?.manage?.firstAdvertisedDateTime ?? null;
+    if (firstAdvertisedAt && firstAdvertisedAt < FIRST_SEEN_CUTOFF) continue;
+    allStale = false;
+
+    const item = normalizeEncarItem(raw);
+    item.first_advertised_at = firstAdvertisedAt;
+    const fullPhotos = detail ? extractOrderedPhotos(detail) : null;
+    if (fullPhotos && fullPhotos.length > 0) item.photos = fullPhotos;
+    items.push(item);
   }
 
   return {
     items,
     total: typeof data?.Count === 'number' ? data.Count : null,
+    allStale,
   };
 }
 
 /**
- * Полная галерея фото объявления с детальной карточки (без ограничения).
+ * Детальная карточка объявления - используется ТОЛЬКО как источник
+ * firstAdvertisedDateTime (фильтр по дате) и photos[] (полная галерея).
+ * Намеренно не читаем и никуда не пробрасываем contact/partnership.dealer
+ * и другие поля с личными/контактными данными продавца или дилера - они
+ * есть в сыром ответе Encar, но не должны попадать ни в normalizeEncarItem,
+ * ни в raw, ни в БД.
+ */
+async function fetchEncarDetail(id) {
+  try {
+    const { data } = await client().get(`${DETAIL_BASE}/${id}`);
+    return data ?? null;
+  } catch (e) {
+    console.warn(`[encar] не удалось получить детальную карточку объявления ${id}: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Полная галерея фото из детальной карточки (без ограничения).
  *
  * Важно: detail-эндпоинт отдаёт photos[] в произвольном (не отсортированном
  * по смыслу) порядке - иногда первым элементом оказывается фото из салона,
@@ -102,25 +143,19 @@ export async function fetchEncarPage({ page = 0, limit = 20, brand } = {}) {
  * там только числовой код фото без категории, поэтому сортировку по типу
  * можно сделать только здесь, на детальной карточке.
  */
-export async function fetchEncarPhotos(id) {
-  try {
-    const { data } = await client().get(`${DETAIL_BASE}/${id}`);
-    const photos = Array.isArray(data?.photos) ? data.photos : [];
-    if (photos.length === 0) return null;
+function extractOrderedPhotos(detail) {
+  const photos = Array.isArray(detail?.photos) ? detail.photos : [];
+  if (photos.length === 0) return null;
 
-    const byCodeAsc = (a, b) => Number(a.code) - Number(b.code);
-    // Экстерьер - вперёд и по возрастанию code (это соответствует порядку
-    // съёмки: перед/бок/зад), остальное (кроме THUMBNAIL-дублей) - следом.
-    const outer = photos.filter((p) => p.type === 'OUTER').sort(byCodeAsc);
-    const rest = photos.filter((p) => p.type !== 'OUTER' && p.type !== 'THUMBNAIL').sort(byCodeAsc);
-    const ordered = [...outer, ...rest];
+  const byCodeAsc = (a, b) => Number(a.code) - Number(b.code);
+  // Экстерьер - вперёд и по возрастанию code (это соответствует порядку
+  // съёмки: перед/бок/зад), остальное (кроме THUMBNAIL-дублей) - следом.
+  const outer = photos.filter((p) => p.type === 'OUTER').sort(byCodeAsc);
+  const rest = photos.filter((p) => p.type !== 'OUTER' && p.type !== 'THUMBNAIL').sort(byCodeAsc);
+  const ordered = [...outer, ...rest];
 
-    if (ordered.length === 0) return null;
-    return ordered.map((p) => `https://ci.encar.com/carpicture${p.path}`);
-  } catch (e) {
-    console.warn(`[encar] не удалось получить фото объявления ${id}: ${e.message}`);
-  }
-  return null;
+  if (ordered.length === 0) return null;
+  return ordered.map((p) => `https://ci.encar.com/carpicture${p.path}`);
 }
 
 export function normalizeEncarItem(item) {
@@ -128,7 +163,7 @@ export function normalizeEncarItem(item) {
   // используется как fallback, если детальный запрос не удастся.
   // ВАЖНО: у item.Photos[].type здесь просто числовой код фото (совпадает
   // с полем `code` детальной карточки), а НЕ категория "экстерьер/салон" -
-  // в отличие от одноимённого поля `type` в detail-ответе (см. fetchEncarPhotos).
+  // в отличие от одноимённого поля `type` в detail-ответе (см. extractOrderedPhotos).
   // На проверенных объявлениях список всегда приходит уже по возрастанию
   // ordering (и code 001 у Encar стабильно оказывается экстерьером), но
   // сортируем явно, а не полагаемся на порядок ответа API.
@@ -175,15 +210,34 @@ export function normalizeEncarItem(item) {
 export async function fetchAllEncar({ limit = 20, brand, onPage, maxItems } = {}) {
   const all = [];
   let total = null;
+  // Список отсортирован по ModifiedDate, но НЕ строго монотонно: дилерские
+  // "поднятия" объявлений могут вернуть недавно изменённое объявление позже
+  // в выдаче, чем более старое (подтверждено вручную на реальном ответе API -
+  // среди 5 подряд идущих карточек одна оказалась новее всех предыдущих, но
+  // стояла после заведомо более старой). Поэтому одной "старой" страницы
+  // недостаточно для остановки - ждём 4 страницы подряд, где ВСЕ объявления
+  // старше FIRST_SEEN_CUTOFF, и только тогда останавливаем пагинацию раньше
+  // конца каталога. Порог 4 (а не 2) - дополнительная подстраховка ценой
+  // всего пары лишних минут на весь sync, против риска, что серия дилерских
+  // "поднятий" старых объявлений подряд закопает свежие глубже одной страницы.
+  const STALE_PAGES_THRESHOLD = 4;
+  let consecutiveStalePages = 0;
   for (let page = 0; ; page++) {
-    const { items, total: pageTotal } = await fetchEncarPage({ page, limit, brand });
+    const { items, total: pageTotal, allStale } = await fetchEncarPage({ page, limit, brand });
     if (page === 0) {
       total = pageTotal;
       console.log(`[encar] всего объявлений по фильтру: ${total ?? 'неизвестно (нет Count в ответе)'}`);
     }
-    if (items.length === 0) break;
-    if (onPage) await onPage(items);
+    if (onPage && items.length > 0) await onPage(items);
     all.push(...items);
+
+    consecutiveStalePages = allStale ? consecutiveStalePages + 1 : 0;
+    if (consecutiveStalePages >= STALE_PAGES_THRESHOLD) {
+      console.log(`[encar] ${STALE_PAGES_THRESHOLD} страницы подряд старше отсечки по дате - останавливаю пагинацию раньше времени`);
+      break;
+    }
+
+    if (items.length === 0 && !allStale) break; // страница пустая (конец каталога, не фильтр по дате)
     if (maxItems != null && all.length >= maxItems) break;
     if (total != null && all.length >= total) break;
     await new Promise((r) => setTimeout(r, 1200)); // не долбить API слишком часто
