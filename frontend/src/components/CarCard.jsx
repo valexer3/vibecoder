@@ -7,9 +7,19 @@ function formatPrice(rub) {
   return `${Math.round(rub).toLocaleString('ru-RU')} ₽`;
 }
 
+function daysAgoLabel(registeredAt) {
+  if (!registeredAt) return null;
+  const days = Math.floor((Date.now() - new Date(registeredAt).getTime()) / 86400000);
+  if (days < 0) return null;
+  if (days === 0) return 'Сегодня';
+  if (days === 1) return 'Вчера';
+  return `${days} дн. назад`;
+}
+
 export default function CarCard({ car, onSelect, compact = false, badge = null }) {
   const [photo, setPhoto] = useState(car.photos?.[0] ?? null);
   const photoCount = car.photos?.length ?? 0;
+  const age = daysAgoLabel(car.registered_at);
 
   function open() {
     onSelect(car);
@@ -40,6 +50,7 @@ export default function CarCard({ car, onSelect, compact = false, badge = null }
         <div className="car-card-media-overlay" />
         <span className="car-card-origin">{COUNTRY_LABEL[car.source] ?? car.source}</span>
         {photoCount > 1 && <span className="car-card-photo-count">{photoCount} фото</span>}
+        {age && <span className="car-card-age">{age}</span>}
         {badge && <span className="car-card-badge">{badge}</span>}
       </div>
 
@@ -51,6 +62,7 @@ export default function CarCard({ car, onSelect, compact = false, badge = null }
           <div><dt>Год</dt><dd>{car.year ?? '—'}</dd></div>
           <div><dt>Пробег</dt><dd>{car.mileage_km != null ? `${car.mileage_km.toLocaleString('ru-RU')} км` : '—'}</dd></div>
           <div><dt>Топливо</dt><dd>{car.fuel_type ?? '—'}</dd></div>
+          <div><dt>Кузов</dt><dd>{car.body_type ?? '—'}</dd></div>
         </dl>
 
         <div className="car-card-price">{formatPrice(car.price_rub)}</div>

@@ -14,6 +14,13 @@ function formatOrigin(price, currency) {
   return `${Math.round(price).toLocaleString('ru-RU')} ${symbol}`;
 }
 
+const ENCAR_VERIFIED_LABELS = {
+  encarCheck: 'Encar Check',
+  diagnosisCar: 'Диагностика Encar',
+  directInspected: 'Осмотрено лично',
+  preVerified: 'Предпроверено',
+};
+
 export default function CarDetails({ car, onClose, onRequestLead }) {
   const photos = car.photos?.length ? car.photos : [];
   const [active, setActive] = useState(0);
@@ -33,9 +40,35 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
     ['Пробег', car.mileage_km != null ? `${car.mileage_km.toLocaleString('ru-RU')} км` : '—'],
     ['Топливо', car.fuel_type ?? '—'],
     ['Коробка', car.transmission ?? '—'],
+    ['Кузов', car.body_type ?? '—'],
     ['Объём двигателя', car.engine_volume ? `${car.engine_volume} л` : '—'],
     ['Цвет', car.color ?? '—'],
+    ...(car.vin ? [['VIN', car.vin]] : []),
   ];
+
+  const verifiedBadges = Object.entries(ENCAR_VERIFIED_LABELS)
+    .filter(([key]) => car.encar_verified?.[key])
+    .map(([, label]) => label);
+
+  const accidentReportAvailable = car.accident_info?.recordView || car.accident_info?.resumeView;
+  const seizingCount = car.seizing_info?.seizingCount ?? 0;
+  const pledgeCount = car.seizing_info?.pledgeCount ?? 0;
+  const hasSeizingInfo = car.seizing_info != null;
+
+  const warranty = car.warranty_info;
+  const hasWarranty = warranty && (warranty.bodyMonth || warranty.transmissionMonth);
+
+  // Показываем "цену нового" только как ориентир выгоды, и только если она
+  // заметно выше текущей цены объявления - сравниваем в одной валюте
+  // (origin_price и price_origin оба в валюте площадки-источника, KRW/CNY;
+  // price_rub - это уже пересчитанная в рубли цена ОБЪЯВЛЕНИЯ, сравнивать
+  // с ней origin_price напрямую нельзя - разные валюты дадут бессмысленное
+  // число). Порог 15% - чтобы не показывать блок на машинах, купленных
+  // почти по цене новой (выгода в пределах естественного разброса).
+  const showOriginPrice = car.origin_price != null && car.price_origin != null
+    && car.origin_price > car.price_origin * 1.15;
+
+  const optionsCount = car.options?.length ?? 0;
 
   return (
     <div className="details-overlay" onClick={onClose}>
@@ -84,11 +117,51 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
           <h2>{car.brand} {car.model}</h2>
           {car.trim && <p className="details-trim">{car.trim}</p>}
 
+          {verifiedBadges.length > 0 && (
+            <div className="details-verified-badges">
+              {verifiedBadges.map((label) => (
+                <span key={label} className="details-verified-badge">✓ {label}</span>
+              ))}
+            </div>
+          )}
+
           <dl className="details-specs">
             {specs.map(([label, value]) => (
               <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
             ))}
           </dl>
+
+          {(car.accident_info != null || hasSeizingInfo) && (
+            <div className="details-trust-block">
+              <h4>История и юридическая чистота</h4>
+              {car.accident_info != null && (
+                <p className={accidentReportAvailable ? 'is-ok' : 'is-warn'}>
+                  {accidentReportAvailable ? '✓' : '⚠'} {accidentReportAvailable
+                    ? 'Отчёт по истории доступен на Encar'
+                    : 'Отчёт по истории недоступен'}
+                </p>
+              )}
+              {hasSeizingInfo && (
+                <p className={seizingCount === 0 && pledgeCount === 0 ? 'is-ok' : 'is-warn'}>
+                  {seizingCount === 0 && pledgeCount === 0
+                    ? '✓ Обременений и залогов нет'
+                    : `⚠ Обременения: ${seizingCount}, залоги: ${pledgeCount}`}
+                </p>
+              )}
+            </div>
+          )}
+
+          {hasWarranty && (
+            <div className="details-warranty-block">
+              <h4>Гарантия</h4>
+              {warranty.bodyMonth && (
+                <p>Кузов: {warranty.bodyMonth} мес / {warranty.bodyMileage?.toLocaleString('ru-RU')} км</p>
+              )}
+              {warranty.transmissionMonth && (
+                <p>Трансмиссия: {warranty.transmissionMonth} мес / {warranty.transmissionMileage?.toLocaleString('ru-RU')} км</p>
+              )}
+            </div>
+          )}
 
           <div className="details-price-block">
             <div className="details-price">{formatPrice(car.price_rub)}</div>
@@ -97,7 +170,18 @@ export default function CarDetails({ car, onClose, onRequestLead }) {
                 {formatOrigin(car.price_origin, car.currency)} на площадке-источнике
               </div>
             )}
+            {showOriginPrice && (
+              <div className="details-price-new">
+                Цена нового: {formatOrigin(car.origin_price, car.currency)}
+              </div>
+            )}
           </div>
+
+          {optionsCount > 0 && (
+            <details className="details-options">
+              <summary>В комплектации: {optionsCount} опций</summary>
+            </details>
+          )}
 
           <div className="details-actions">
             <button className="details-cta" onClick={() => onRequestLead(car)}>Оставить заявку</button>

@@ -274,6 +274,13 @@ h1, h2, h3 {
   color: var(--steel);
   font-size: 11px; padding: 3px 8px; border-radius: var(--radius);
 }
+.car-card-age {
+  position: absolute; bottom: 10px; left: 10px;
+  background: rgba(14,15,16,0.85);
+  border: 1px solid var(--line);
+  color: var(--steel);
+  font-size: 11px; padding: 3px 8px; border-radius: var(--radius);
+}
 .car-card-body { padding: 14px 16px 16px; }
 .car-card-body h3 { font-size: 20px; color: var(--white); font-weight: 600; }
 .car-card-trim { color: var(--steel-dim); font-size: 13px; margin: 2px 0 10px; }
@@ -551,9 +558,30 @@ h1, h2, h3 {
 .details-specs dt { font-size: 12px; color: var(--steel-dim); }
 .details-specs dd { margin: 0; font-size: 14px; color: var(--steel); }
 
-.details-price-block { margin-bottom: 22px; }
+.details-verified-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.details-verified-badge {
+  background: rgba(46,160,67,0.12); border: 1px solid rgba(46,160,67,0.35);
+  color: #4fd166; font-size: 11px; padding: 3px 8px; border-radius: var(--radius);
+}
+
+.details-trust-block, .details-warranty-block {
+  border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px;
+}
+.details-trust-block h4, .details-warranty-block h4 {
+  font-size: 13px; color: var(--steel-dim); text-transform: uppercase; letter-spacing: 0.04em;
+  margin: 0 0 8px;
+}
+.details-trust-block p, .details-warranty-block p { margin: 0 0 4px; font-size: 14px; color: var(--steel); }
+.details-trust-block p.is-ok { color: #4fd166; }
+.details-trust-block p.is-warn { color: var(--red-bright); }
+
+.details-price-block { margin-top: 14px; margin-bottom: 22px; }
 .details-price { font-family: var(--font-display); font-size: 30px; color: var(--red-bright); }
 .details-price-origin { color: var(--steel-dim); font-size: 13px; margin-top: 2px; }
+.details-price-new { color: var(--steel-dim); font-size: 13px; margin-top: 2px; }
+
+.details-options { margin-bottom: 16px; }
+.details-options summary { cursor: pointer; font-size: 13px; color: var(--steel); }
 
 .details-actions { display: flex; flex-direction: column; gap: 12px; margin-top: auto; }
 .details-cta {
