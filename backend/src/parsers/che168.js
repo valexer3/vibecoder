@@ -64,7 +64,12 @@ let browserPromise = null;
 function getBrowser() {
   if (!browserPromise) {
     const proxy = process.env.PROXY_URL_CN ? { server: process.env.PROXY_URL_CN } : undefined;
-    browserPromise = chromium.launch({ headless: true, proxy });
+    // .catch сбрасывает кэш при неудачном launch - иначе браузер long-lived
+    // cron-воркера навсегда "застревает" на отклонённом промисе (см. аудит).
+    browserPromise = chromium.launch({ headless: true, proxy }).catch((err) => {
+      browserPromise = null;
+      throw err;
+    });
   }
   return browserPromise;
 }
@@ -114,9 +119,17 @@ async function loadListPage(url) {
 export function parseListPage(html) {
   const $ = cheerio.load(html);
   const items = [];
-  let allStale = true;
+  const cardEls = $('.cards-li[infoid]').toArray();
+  // allStale означает "на странице была хотя бы одна карточка, и КАЖДАЯ из
+  // них старше отсечки по дате" - только это законный повод считать
+  // страницу "хвостом" и досрочно останавливать пагинацию (см.
+  // STALE_PAGES_THRESHOLD ниже). Инициализируем true только когда карточки
+  // вообще есть - иначе пустая/нераспознанная разметка ошибочно считалась
+  // бы "устаревшей" и могла привести к markStaleInactive на не пройденных
+  // страницах (см. аудит).
+  let allStale = cardEls.length > 0;
 
-  for (const el of $('.cards-li[infoid]').toArray()) {
+  for (const el of cardEls) {
     const $el = $(el);
     const infoId = $el.attr('infoid');
     const carname = ($el.attr('carname') ?? '').trim();
@@ -126,12 +139,15 @@ export function parseListPage(html) {
     // это NOT NULL поля) - такое на практике встречается у рекламных
     // блоков без infoid (они и так не проходят селектор выше), но на
     // всякий случай пропускаем явно, а не падаем на upsertCar.
-    if (!infoId || !carname || !Number.isFinite(priceWan) || !regdate) continue;
+    if (!infoId || !carname || !Number.isFinite(priceWan) || !regdate) {
+      allStale = false; // некорректная карточка - не свидетельство "устарелости" страницы
+      continue;
+    }
 
     const publicDateRaw = $el.attr('publicdate');
     const publicDate = publicDateRaw ? new Date(publicDateRaw) : null;
-    if (publicDate && publicDate < FIRST_SEEN_CUTOFF) continue; // старое - пропускаем, но страницу считаем "живой" ниже
-    if (publicDate) allStale = false;
+    if (publicDate && publicDate < FIRST_SEEN_CUTOFF) continue; // старое - пропускаем, allStale не трогаем
+    allStale = false; // свежая карточка ИЛИ дата неизвестна - страница не "полностью устаревшая"
 
     const brandId = Number($el.attr('brandid'));
     const seriesId = Number($el.attr('seriesid'));
@@ -194,6 +210,7 @@ export async function normalizeChe168Item(raw) {
     model: seriesName ?? raw.carname,
     trim,
     year,
+    city: raw.city ?? null,
     mileage_km: Number.isFinite(raw.milageWan) ? Math.round(raw.milageWan * 10000) : null,
     fuel_type: null, // недоступно в списке (только на detail, куда сознательно не ходим - см. шапку файла)
     transmission: null,
@@ -244,12 +261,19 @@ export async function fetchAllChe168({ listUrlTemplates = [], onPage, maxPages =
   const STALE_PAGES_THRESHOLD = 3;
 
   try {
-    for (const template of listUrlTemplates) {
+    for (const [templateIndex, template] of listUrlTemplates.entries()) {
       let consecutiveStalePages = 0;
       let consecutiveHardFailures = 0;
       let consecutiveCaptchaPages = 0;
+      // startPage - это resume-курсор ДЛЯ ОДНОГО прогона одного источника
+      // (см. sync_progress в schema.sql - ключ только "che168", без привязки
+      // к шаблону), поэтому осмысленно применим он только к первому шаблону
+      // в списке; остальные всегда начинаются с 1 - иначе при нескольких
+      // URL-шаблонах resume после сбоя молча пропускал бы первые страницы
+      // всех шаблонов, кроме того, на котором произошёл сбой (см. аудит).
+      const templateStartPage = templateIndex === 0 ? startPage : 1;
 
-      for (let page = startPage; page <= maxPages; page++) {
+      for (let page = templateStartPage; page <= maxPages; page++) {
         const url = template.replace('{page}', String(page));
         let result;
 
@@ -290,7 +314,15 @@ export async function fetchAllChe168({ listUrlTemplates = [], onPage, maxPages =
         if (result.status === 'empty') {
           consecutiveHardFailures++;
           if (consecutiveHardFailures >= HARD_FAILURE_PAGES_THRESHOLD) {
-            throw Object.assign(new Error(`Che168: ${HARD_FAILURE_PAGES_THRESHOLD} страниц подряд без карточек - похоже на конец каталога или сбой, останавливаю на странице ${page}`), { failedAtPage: page });
+            // Чистый выход, а не throw: серия пустых страниц у че168 в
+            // подавляющем большинстве случаев - это конец каталога фильтра
+            // (у общего "all-China" URL страница 100 - жёсткий потолок сайта
+            // раньше сюда дойти не даёт, но у более узких URL по
+            // бренду/городу конец каталога наступает раньше). throw здесь
+            // означал бы, что sync.js никогда не увидит completedFully и
+            // sync_progress навсегда зависнет на этой странице (см. аудит).
+            console.log(`[che168] ${HARD_FAILURE_PAGES_THRESHOLD} страниц подряд без карточек - считаю концом каталога, выхожу на странице ${page}`);
+            break;
           }
           continue;
         }

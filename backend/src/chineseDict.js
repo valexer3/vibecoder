@@ -590,8 +590,10 @@ async function fetchBrandSeries(brandId) {
   // зависимость (iconv-lite и т.п.) не нужна.
   const html = new TextDecoder('gbk').decode(data);
   const map = new Map();
-  let m;
-  while ((m = SERIES_RE.exec(html))) {
+  // matchAll (не while+exec) - у /g regex exec мутирует общий для модуля
+  // SERIES_RE.lastIndex; matchAll работает с внутренней копией и не зависит
+  // от того, что происходило в предыдущем вызове (см. аудит).
+  for (const m of html.matchAll(SERIES_RE)) {
     const id = Number(m[1]);
     if (!map.has(id)) map.set(id, m[2].trim());
   }

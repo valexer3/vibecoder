@@ -46,6 +46,10 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS encar_verified JSONB;
 -- НЕ страховая история (см. аудит) - это собственная диагностика Encar.
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS inspection_report JSONB;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS inspection_report_url TEXT;
+-- Город продажи из карточки списка Che168 (см. parsers/che168.js) - один
+-- из немногих полезных фасетов, доступных для этого источника без похода
+-- на detail-страницу (которая эскалирует в капчу - см. шапку che168.js).
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS city TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_cars_brand_model ON cars (brand, model);
 CREATE INDEX IF NOT EXISTS idx_cars_year ON cars (year);
