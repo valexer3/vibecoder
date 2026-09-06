@@ -1,0 +1,21 @@
+# Образ для воркера синхронизации (sync.js) - отдельный Railway-сервис от
+# API (server.js). Нужен именно здесь, а не в обычном Nixpacks-билде API,
+# потому что parsers/che168.js гоняет headless Chromium через Playwright
+# (см. README.md - "Che168" и историю разведки антибот-защиты).
+#
+# Базовый образ Microsoft уже содержит Chromium ровно нужной версии со
+# всеми системными библиотеками (libnss3, libatk и т.п.) - отдельный шаг
+# "npx playwright install" не нужен. ВАЖНО: тег образа (v1.63.0-jammy)
+# должен совпадать с версией пакета "playwright" в package.json - иначе
+# Playwright не найдёт совместимый браузер. При обновлении playwright в
+# package.json синхронно поднимай и тег здесь.
+FROM mcr.microsoft.com/playwright:v1.63.0-jammy
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+CMD ["node", "src/sync.js"]

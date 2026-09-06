@@ -5,9 +5,12 @@ import { fetchAllChe168 } from './parsers/che168.js';
 import { upsertCar, markStaleInactive, getFxRate, pool, getSyncProgress, setSyncProgress, clearSyncProgress } from './db.js';
 import { calculatePriceRub } from './pricing.js';
 
+// "{page}" - плейсхолдер номера страницы (см. fetchAllChe168 в
+// parsers/che168.js). lto8 в URL - сортировка "最新发布" (новые сначала) -
+// нужна для раннего выхода по дате публикации, аналогично сортировке
+// Encar по ModifiedDate.
 const CHE168_LIST_URLS = [
-  // Добавь сюда конкретные листинговые URL che168 по нужным маркам/городам
-  // 'https://www.che168.com/china/a0_0msdgscncgpi1ltocsp1exx0/',
+  'https://www.che168.com/china/a0_0msdgscncgpi1lto8csp{page}exx0/',
 ];
 
 async function syncEncar() {
@@ -78,15 +81,56 @@ async function syncChe168() {
     return;
   }
   console.log('[sync] Che168: старт');
-  const items = await fetchAllChe168(CHE168_LIST_URLS);
-  const ids = [];
-  for (const car of items) {
-    if (!car.source_id) continue;
-    await upsertCar(car);
-    ids.push(car.source_id);
+  const cnyRate = await getFxRate('CNY');
+  if (cnyRate == null) {
+    console.warn('[sync] Che168: курс CNY не найден в fx_rates - price_rub НЕ будет посчитан (запусти обновление курсов)');
   }
-  await markStaleInactive('che168', ids);
-  console.log(`[sync] Che168: готово, объявлений: ${items.length}`);
+  const ids = [];
+  let total = 0;
+  const startPage = await getSyncProgress('che168');
+  if (startPage > 1) {
+    console.log(`[sync] Che168: продолжаю с сохранённого прогресса - страница ${startPage} (предыдущий проход прервался из-за сбоя/блокировки)`);
+  }
+  let completedFully = false;
+  try {
+    await fetchAllChe168({
+      listUrlTemplates: CHE168_LIST_URLS,
+      startPage: startPage > 1 ? startPage : 1,
+      onPage: async (items, page) => {
+        for (const car of items) {
+          try {
+            car.price_rub = cnyRate != null ? calculatePriceRub(car.price_origin, cnyRate) : null;
+            await upsertCar(car);
+            ids.push(car.source_id);
+          } catch (e) {
+            console.error(`[sync] Che168: не удалось сохранить объявление ${car.source_id}: ${e.message}`);
+          }
+        }
+        total += items.length;
+        console.log(`[sync] Che168: обработано ${total} объявлений...`);
+        await setSyncProgress('che168', page + 1);
+      },
+    });
+    // Проход завершился штатно (конец каталога либо ранний выход по дате) -
+    // сбрасываем прогресс, следующий цикл снова начнёт со страницы 1.
+    await clearSyncProgress('che168');
+    completedFully = true;
+  } catch (e) {
+    // Сюда попадаем при устойчивой антибот-блокировке или серии сетевых
+    // сбоев подряд (см. CAPTCHA_PAGES_THRESHOLD/HARD_FAILURE_PAGES_THRESHOLD
+    // в parsers/che168.js) - прогресс уже сохранён на последней успешной
+    // странице, следующий запуск (через 3 часа) продолжит с неё.
+    console.error(`[sync] Che168: проход прерван - ${e.message}`);
+  }
+  // Как и у Encar - markStaleInactive корректен только когда проход реально
+  // дошёл до конца каталога (или до раннего выхода по дате), а не оборвался
+  // на части страниц из-за блокировки/сбоя.
+  if (completedFully) {
+    await markStaleInactive('che168', ids);
+  } else {
+    console.log('[sync] Che168: markStaleInactive пропущен (неполный проход)');
+  }
+  console.log(`[sync] Che168: готово, объявлений: ${total}`);
 }
 
 // ЦБ РФ официально не публикует курс южнокорейской воны (KRW), поэтому курсы
