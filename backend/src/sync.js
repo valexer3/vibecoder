@@ -91,11 +91,13 @@ async function syncChe168() {
   if (startPage > 1) {
     console.log(`[sync] Che168: продолжаю с сохранённого прогресса - страница ${startPage} (предыдущий проход прервался из-за сбоя/блокировки)`);
   }
+  const maxItems = process.env.SYNC_MAX_ITEMS ? Number(process.env.SYNC_MAX_ITEMS) : undefined;
   let completedFully = false;
   try {
     await fetchAllChe168({
       listUrlTemplates: CHE168_LIST_URLS,
       startPage: startPage > 1 ? startPage : 1,
+      maxItems,
       onPage: async (items, page) => {
         for (const car of items) {
           try {
@@ -124,11 +126,15 @@ async function syncChe168() {
   }
   // Как и у Encar - markStaleInactive корректен только когда проход реально
   // дошёл до конца каталога (или до раннего выхода по дате), а не оборвался
-  // на части страниц из-за блокировки/сбоя.
-  if (completedFully) {
+  // на части страниц из-за блокировки/сбоя. При тестовом SYNC_MAX_ITEMS ids -
+  // тоже лишь маленький кусок каталога (проход останавливается досрочно по
+  // достижении лимита, а не по концу каталога), поэтому исключаем и его -
+  // иначе тестовый прогон на 10 объявлений погасил бы is_active почти у
+  // всего остального каталога Che168.
+  if (completedFully && maxItems == null) {
     await markStaleInactive('che168', ids);
   } else {
-    console.log('[sync] Che168: markStaleInactive пропущен (неполный проход)');
+    console.log('[sync] Che168: markStaleInactive пропущен (неполный/тестовый проход)');
   }
   console.log(`[sync] Che168: готово, объявлений: ${total}`);
 }
@@ -170,17 +176,32 @@ async function syncFx() {
   }
 }
 
+// Encar и Che168 теперь развёрнуты как ДВА отдельных Railway-сервиса
+// (основной vibecoder + отдельный che168-сервис - последний нужен, чтобы
+// Che168 не делил IP/сетевую репутацию с Encar-трафиком и не проходил их
+// планировщик синхронно). SYNC_SOURCE говорит, какой источник обслуживает
+// текущий процесс - без неё (например, локально) оба идут вместе, как
+// раньше, поэтому дефолт 'all' сохраняет старое поведение.
+const SYNC_SOURCE = process.env.SYNC_SOURCE || 'all'; // 'encar' | 'che168' | 'all'
+
 async function runAll() {
+  // Курсы валют дешёвые и нужны обоим сервисам (каждый считает price_rub
+  // только для своего источника, но оба сервиса должны видеть свежий курс
+  // своей валюты) - поэтому syncFx выполняется независимо от SYNC_SOURCE.
   await syncFx();
-  try {
-    await syncEncar();
-  } catch (e) {
-    console.error('[sync] Encar: непредвиденная ошибка верхнего уровня -', e.message);
+  if (SYNC_SOURCE === 'encar' || SYNC_SOURCE === 'all') {
+    try {
+      await syncEncar();
+    } catch (e) {
+      console.error('[sync] Encar: непредвиденная ошибка верхнего уровня -', e.message);
+    }
   }
-  try {
-    await syncChe168();
-  } catch (e) {
-    console.error('[sync] Che168: непредвиденная ошибка верхнего уровня -', e.message);
+  if (SYNC_SOURCE === 'che168' || SYNC_SOURCE === 'all') {
+    try {
+      await syncChe168();
+    } catch (e) {
+      console.error('[sync] Che168: непредвиденная ошибка верхнего уровня -', e.message);
+    }
   }
 }
 

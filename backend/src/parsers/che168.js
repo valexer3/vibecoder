@@ -250,8 +250,12 @@ export async function normalizeChe168Item(raw) {
  *   не более 100 страниц на фильтр - ограничение самого сайта)
  * @param {number} [opts.startPage] - с какой страницы продолжить (resume
  *   после сбоя - см. sync.js)
+ * @param {number} [opts.maxItems] - тестовый потолок общего числа собранных
+ *   объявлений по ВСЕМ шаблонам (см. SYNC_MAX_ITEMS в sync.js, аналог
+ *   maxItems у fetchAllEncar) - останавливает проход досрочно, не дожидаясь
+ *   конца каталога/фильтра по дате.
  */
-export async function fetchAllChe168({ listUrlTemplates = [], onPage, maxPages = 100, startPage = 1 } = {}) {
+export async function fetchAllChe168({ listUrlTemplates = [], onPage, maxPages = 100, startPage = 1, maxItems } = {}) {
   if (listUrlTemplates.length === 0) return;
 
   // Список отсортирован по publicdate (новые сначала, см. lto8 в шаблоне
@@ -259,8 +263,10 @@ export async function fetchAllChe168({ listUrlTemplates = [], onPage, maxPages =
   // ModifiedDate и дилерские "поднятия" сбивают порядок), поэтому порог
   // ниже (3 против 4 у Encar) достаточен.
   const STALE_PAGES_THRESHOLD = 3;
+  let totalItems = 0;
 
   try {
+    templateLoop:
     for (const [templateIndex, template] of listUrlTemplates.entries()) {
       let consecutiveStalePages = 0;
       let consecutiveHardFailures = 0;
@@ -337,11 +343,17 @@ export async function fetchAllChe168({ listUrlTemplates = [], onPage, maxPages =
         }
 
         if (onPage && items.length > 0) await onPage(items, page);
+        totalItems += items.length;
 
         consecutiveStalePages = allStale ? consecutiveStalePages + 1 : 0;
         if (consecutiveStalePages >= STALE_PAGES_THRESHOLD) {
           console.log(`[che168] ${STALE_PAGES_THRESHOLD} страницы подряд старше отсечки по дате - останавливаю пагинацию раньше времени`);
           break;
+        }
+
+        if (maxItems != null && totalItems >= maxItems) {
+          console.log(`[che168] достигнут лимит maxItems=${maxItems} (собрано ${totalItems}) - останавливаю проход`);
+          break templateLoop;
         }
 
         await sleep(2000); // не долбить чаще, чем реально нужно
