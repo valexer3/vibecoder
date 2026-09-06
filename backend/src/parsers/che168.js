@@ -154,7 +154,17 @@ export function parseListPage(html) {
     const milageWan = parseFloat($el.attr('milage'));
     const dealerId = $el.attr('dealerid') ?? null;
     const href = $el.find('a').first().attr('href') ?? null;
-    const img = $el.find('img').first().attr('src') ?? null;
+    // Карточки за пределами первого экрана рендерятся с ленивой загрузкой
+    // (атрибут name="lazyloadImg") - у них "src" указывает на общую заглушку
+    // (.../default-220x165.png), а реальный URL фото лежит в "src2" и
+    // подставляется в src только когда JS на клиенте реально долистает до
+    // карточки. В нашем прогоне (один снимок HTML, без скролла) это
+    // затрагивает большинство карточек на странице - проверено вручную,
+    // ~49 из 56 карточек типового списка используют src2 (см. историю
+    // разведки). "src" оставляем как fallback на случай, если src2 вдруг
+    // отсутствует (карточки над сгибом грузятся сразу в src).
+    const $img = $el.find('img').first();
+    const img = $img.attr('src2') || $img.attr('src') || null;
     // "8.23万公里／2021-07／北京／5年黑金会员" - третий сегмент (после
     // пробега и даты регистрации) - город, текстом на китайском.
     const cardsUnitText = $el.find('.cards-unit').first().text().trim();
